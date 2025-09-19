@@ -90,8 +90,7 @@ class HelloWorldPanel {
                         this._testStackSpotConnection(message.clientId, message.clientSecret, this._panel);
                         return;
                     case 'generateStories':
-                        vscode.window.showInformationMessage(`Gerando histórias para: ${message.featureName}`);
-                        // Aqui será implementada a integração com StackSpot
+                        this._generateUserStories(message.featureName, message.featureDescription);
                         return;
                 }
             },
@@ -257,8 +256,93 @@ class HelloWorldPanel {
         });
     }
 
+    /**
+     * Gera histórias de usuário usando o StackSpot
+     * @param featureName - Nome da funcionalidade
+     * @param featureDescription - Descrição detalhada da funcionalidade
+     */
+    private async _generateUserStories(featureName: string, featureDescription: string) {
+        console.log(`[StackSpot] 🎯 Iniciando geração de histórias de usuário para: ${featureName}`);
+        
+        try {
+            // Carrega as configurações para obter o SLUG
+            const config = await this.loadConfig();
+            const createStoriesSlug = config.stackspot?.slugs?.createStories;
+            
+            if (!createStoriesSlug) {
+                const errorMsg = 'SLUG para "Criar histórias de usuário" não configurado. Verifique as configurações.';
+                console.error(`[StackSpot] ❌ ${errorMsg}`);
+                this._panel.webview.postMessage({
+                command: 'userStoriesError',
+                error: errorMsg
+            });
+                return;
+            }
+            
+            console.log(`[StackSpot] 📋 Usando SLUG: ${createStoriesSlug}`);
+            
+            // Notifica o início da geração
+            this._panel.webview.postMessage({
+                command: 'userStoriesGenerating',
+                featureName: featureName
+            });
+            
+            // Prepara o payload com a descrição da funcionalidade
+            const payload = {
+                feature_name: featureName,
+                feature_description: featureDescription
+            };
+            
+            console.log(`[StackSpot] 📝 Payload preparado: ${JSON.stringify(payload, null, 2)}`);
+            
+            // Executa o quick-command (sem conversation_id conforme solicitado)
+            const result = await this.executeQuickCommand(createStoriesSlug, payload);
+            
+            console.log(`[StackSpot] ✅ Histórias de usuário geradas com sucesso!`);
+            
+            // Envia o resultado para a interface
+            this._panel.webview.postMessage({
+                command: 'userStoriesGenerated',
+                result: result,
+                featureName: featureName
+            });
+            
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`[StackSpot] 💥 Erro ao gerar histórias de usuário:`, error);
+            
+            this._panel.webview.postMessage({
+                command: 'userStoriesError',
+                error: errorMessage,
+                featureName: featureName
+            });
+        }
+    }
+
+    /**
+     * Carrega as configurações do StackSpot
+     * @returns Configurações completas
+     */
+    private async loadConfig() {
+        const config = vscode.workspace.getConfiguration('aiCodeHive');
+        
+        return {
+            stackspot: {
+                clientId: config.get<string>('stackspot.clientId') || this._context.globalState.get('stackspot_client_id', ''),
+                clientSecret: config.get<string>('stackspot.clientSecret') || this._context.globalState.get('stackspot_client_secret', ''),
+                realm: config.get<string>('stackspot.realm') || this._context.globalState.get('stackspot_realm', 'stackspot-freemium'),
+                slugs: {
+                    createStories: config.get<string>('stackspot.slugs.createStories') || this._context.globalState.get('stackspot_slug_create_stories', ''),
+                    detailBusiness: config.get<string>('stackspot.slugs.detailBusiness') || this._context.globalState.get('stackspot_slug_detail_business', ''),
+                    detailTechnical: config.get<string>('stackspot.slugs.detailTechnical') || this._context.globalState.get('stackspot_slug_detail_technical', ''),
+                    createTests: config.get<string>('stackspot.slugs.createTests') || this._context.globalState.get('stackspot_slug_create_tests', ''),
+                    createTasks: config.get<string>('stackspot.slugs.createTasks') || this._context.globalState.get('stackspot_slug_create_tasks', '')
+                }
+            }
+        };
+    }
+
     private _loadSettings(panel: vscode.WebviewPanel) {
-        // Carregar das configurações do VS Code primeiro
         const config = vscode.workspace.getConfiguration('aiCodeHive');
         
         let clientId = config.get<string>('stackspot.clientId') || '';
@@ -349,7 +433,7 @@ class HelloWorldPanel {
             }
 
             const executionId = await response.text();
-            const cleanExecutionId = executionId.trim();
+            const cleanExecutionId = executionId.trim().replace(/^["']|["']$/g, '');
             
             console.log(`[StackSpot] ✅ Execução criada com sucesso!`);
             console.log(`[StackSpot] 🆔 Execution ID: ${cleanExecutionId}`);
@@ -915,19 +999,26 @@ class HelloWorldPanel {
         <!-- Tela de Criação de Features -->
         <div class="screen" id="featureScreen">
             <h2>✨ Nova Funcionalidade</h2>
-            
+
             <div class="form-group">
                 <label class="form-label">Nome da Funcionalidade:</label>
                 <input type="text" class="form-input" placeholder="Digite o nome da funcionalidade" id="featureName">
             </div>
-            
+
             <div class="form-group">
                 <label class="form-label">Descrição da Funcionalidade:</label>
                 <textarea class="form-textarea" placeholder="Descreva detalhadamente a funcionalidade desejada, incluindo requisitos, regras de negócio e comportamentos esperados..." id="featureDescription"></textarea>
             </div>
-            
+
             <button class="button" id="generateButton">📝 Gerar Histórias de Usuário</button>
             <button class="button back" id="backFromFeatureButton">← Voltar</button>
+        </div>
+
+        <!-- Tela de Resultado -->
+        <div class="screen" id="resultScreen">
+            <h2>📋 Resultado da Geração</h2>
+            <div id="resultContent" style="background: rgba(0,0,0,0.2); padding: 20px; border-radius: 10px; text-align: left; max-height: 400px; overflow-y: auto; white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.4;"></div>
+            <button class="button back" id="backFromResultButton">← Voltar</button>
         </div>
     </div>
 
@@ -1062,6 +1153,10 @@ class HelloWorldPanel {
             document.getElementById('backFromFeatureButton').addEventListener('click', function() {
                 showScreen('homeScreen');
             });
+
+            document.getElementById('backFromResultButton').addEventListener('click', function() {
+                showScreen('featureScreen');
+            });
             
             // Animação de entrada
             document.body.style.opacity = '1';
@@ -1119,6 +1214,16 @@ class HelloWorldPanel {
                     break;
                 case 'connectionError':
                     showNotification('❌ Erro ao conectar com StackSpot: ' + message.error, 'error');
+                    break;
+                case 'userStoriesGenerating':
+                    showNotification('🔄 Gerando histórias de usuário...', 'info');
+                    break;
+                case 'userStoriesGenerated':
+                    showScreen('resultScreen');
+                    document.getElementById('resultContent').innerHTML = '<pre>' + JSON.stringify(message.result, null, 2) + '</pre>';
+                    break;
+                case 'userStoriesError':
+                    showNotification('❌ Erro ao gerar histórias de usuário: ' + message.error, 'error');
                     break;
             }
         });
