@@ -292,6 +292,321 @@ class HelloWorldPanel {
         });
     }
 
+    /**
+     * Cria uma execução de quick-command no StackSpot
+     * @param slug - SLUG do quick-command a ser executado
+     * @param payload - Dados de entrada para o quick-command
+     * @param accessToken - Token de acesso para autenticação
+     * @param conversationId - ID da conversa (opcional)
+     * @returns Promise<string> - ID da execução criada
+     */
+    private async _createQuickCommandExecution(slug: string, payload: any, accessToken: string, conversationId?: string): Promise<string> {
+        const startTime = Date.now();
+        console.log(`[StackSpot] 🚀 Iniciando criação de execução para quick-command: ${slug}`);
+        console.log(`[StackSpot] 📝 Payload: ${JSON.stringify(payload, null, 2)}`);
+        
+        if (conversationId) {
+            console.log(`[StackSpot] 💬 Conversation ID: ${conversationId}`);
+        }
+
+        try {
+            const headers: any = {
+                'Authorization': `Bearer ${accessToken.substring(0, 10)}...`,
+                'Content-Type': 'application/json'
+            };
+
+            // Adiciona o header conversation_id apenas se fornecido
+            if (conversationId) {
+                headers['conversation_id'] = conversationId;
+                console.log(`[StackSpot] ➕ Adicionando header conversation_id: ${conversationId}`);
+            }
+
+            const url = `https://genai-code-buddy-api.stackspot.com/v1/quick-commands/create-execution/${slug}`;
+            console.log(`[StackSpot] 🌐 URL da requisição: ${url}`);
+            console.log(`[StackSpot] 📤 Enviando requisição POST...`);
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json',
+                    ...(conversationId && { 'conversation_id': conversationId })
+                },
+                body: JSON.stringify({
+                    input_data: payload
+                })
+            });
+
+            const duration = Date.now() - startTime;
+            console.log(`[StackSpot] ⏱️ Tempo de resposta: ${duration}ms`);
+            console.log(`[StackSpot] 📊 Status da resposta: ${response.status} ${response.statusText}`);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`[StackSpot] ❌ Erro na criação da execução: ${response.status} - ${response.statusText}`);
+                console.error(`[StackSpot] 📄 Detalhes do erro: ${errorText}`);
+                throw new Error(`Erro na criação da execução: ${response.status} - ${response.statusText}. Detalhes: ${errorText}`);
+            }
+
+            const executionId = await response.text();
+            const cleanExecutionId = executionId.trim();
+            
+            console.log(`[StackSpot] ✅ Execução criada com sucesso!`);
+            console.log(`[StackSpot] 🆔 Execution ID: ${cleanExecutionId}`);
+            console.log(`[StackSpot] ⏱️ Tempo total: ${duration}ms`);
+            
+            return cleanExecutionId;
+
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            console.error(`[StackSpot] 💥 Erro ao criar execução após ${duration}ms:`, error);
+            console.error(`[StackSpot] 🔍 Slug: ${slug}`);
+            console.error(`[StackSpot] 📝 Payload: ${JSON.stringify(payload)}`);
+            throw error;
+        }
+    }
+
+    /**
+     * Faz callback para obter o resultado de uma execução de quick-command
+     * @param executionId - ID da execução a ser consultada
+     * @param accessToken - Token de acesso para autenticação
+     * @returns Promise<any> - Resposta da execução
+     */
+    private async _getQuickCommandCallback(executionId: string, accessToken: string): Promise<any> {
+        const startTime = Date.now();
+        console.log(`[StackSpot] 🔄 Consultando status da execução: ${executionId}`);
+
+        try {
+            const url = `https://genai-code-buddy-api.stackspot.com/v1/quick-commands/callback/${executionId}`;
+            console.log(`[StackSpot] 🌐 URL da consulta: ${url}`);
+            console.log(`[StackSpot] 📤 Enviando requisição GET...`);
+
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const duration = Date.now() - startTime;
+            console.log(`[StackSpot] ⏱️ Tempo de resposta: ${duration}ms`);
+            console.log(`[StackSpot] 📊 Status da resposta: ${response.status} ${response.statusText}`);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`[StackSpot] ❌ Erro na consulta da execução: ${response.status} - ${response.statusText}`);
+                console.error(`[StackSpot] 📄 Detalhes do erro: ${errorText}`);
+                throw new Error(`Erro na consulta da execução: ${response.status} - ${response.statusText}. Detalhes: ${errorText}`);
+            }
+
+            const result = await response.json();
+            console.log(`[StackSpot] 📋 Status atual: ${result.progress?.status || 'N/A'}`);
+            
+            if (result.progress?.status) {
+                const status = result.progress.status;
+                const statusEmoji = status === 'COMPLETED' ? '✅' : 
+                                  status === 'FAILED' ? '❌' : 
+                                  status === 'ERROR' ? '💥' : 
+                                  status === 'RUNNING' ? '🔄' : '⏳';
+                console.log(`[StackSpot] ${statusEmoji} Status da execução: ${status}`);
+                
+                if (result.progress.execution_percentage !== undefined) {
+                    console.log(`[StackSpot] 📊 Progresso: ${result.progress.execution_percentage}%`);
+                }
+            }
+
+            console.log(`[StackSpot] ⏱️ Tempo total da consulta: ${duration}ms`);
+            return result;
+
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            console.error(`[StackSpot] 💥 Erro ao consultar execução após ${duration}ms:`, error);
+            console.error(`[StackSpot] 🆔 Execution ID: ${executionId}`);
+            throw error;
+        }
+    }
+
+    /**
+     * Aguarda a conclusão de uma execução fazendo polling a cada 5 segundos
+     * @param executionId - ID da execução a ser monitorada
+     * @param accessToken - Token de acesso para autenticação
+     * @param maxAttempts - Número máximo de tentativas (padrão: 60 = 5 minutos)
+     * @returns Promise<any> - Resultado final da execução
+     */
+    private async _waitForExecutionCompletion(executionId: string, accessToken: string, maxAttempts: number = 60): Promise<any> {
+        const startTime = Date.now();
+        console.log(`[StackSpot] ⏳ Iniciando monitoramento da execução: ${executionId}`);
+        console.log(`[StackSpot] 🔄 Máximo de tentativas: ${maxAttempts} (${maxAttempts * 5} segundos)`);
+        
+        let attempts = 0;
+        
+        while (attempts < maxAttempts) {
+            attempts++;
+            const attemptStartTime = Date.now();
+            
+            console.log(`[StackSpot] 🔍 Tentativa ${attempts}/${maxAttempts} - Verificando status...`);
+            
+            try {
+                const result = await this._getQuickCommandCallback(executionId, accessToken);
+                const status = result.progress?.status;
+                
+                if (status === 'COMPLETED') {
+                    const totalDuration = Date.now() - startTime;
+                    console.log(`[StackSpot] 🎉 Execução concluída com sucesso!`);
+                    console.log(`[StackSpot] ⏱️ Tempo total de execução: ${Math.round(totalDuration / 1000)}s`);
+                    console.log(`[StackSpot] 🔢 Total de tentativas: ${attempts}`);
+                    
+                    if (result.result) {
+                        console.log(`[StackSpot] 📄 Resultado disponível (${JSON.stringify(result.result).length} caracteres)`);
+                    }
+                    
+                    return result;
+                }
+                
+                if (status === 'FAILED' || status === 'ERROR') {
+                    const totalDuration = Date.now() - startTime;
+                    console.error(`[StackSpot] ❌ Execução falhou com status: ${status}`);
+                    console.error(`[StackSpot] ⏱️ Tempo até falha: ${Math.round(totalDuration / 1000)}s`);
+                    console.error(`[StackSpot] 🔢 Tentativas até falha: ${attempts}`);
+                    
+                    if (result.result) {
+                        console.error(`[StackSpot] 📄 Detalhes do erro: ${JSON.stringify(result.result, null, 2)}`);
+                    }
+                    
+                    throw new Error(`Execução falhou com status: ${status}. Resultado: ${JSON.stringify(result.result)}`);
+                }
+                
+                // Status ainda em andamento (RUNNING, PENDING, etc.)
+                const remainingAttempts = maxAttempts - attempts;
+                const estimatedTimeLeft = remainingAttempts * 5;
+                console.log(`[StackSpot] ⏳ Status: ${status} - Aguardando 5s... (${remainingAttempts} tentativas restantes, ~${estimatedTimeLeft}s)`);
+                
+                if (attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                }
+                
+            } catch (error) {
+                const attemptDuration = Date.now() - attemptStartTime;
+                console.error(`[StackSpot] ⚠️ Erro na tentativa ${attempts} após ${attemptDuration}ms:`, error);
+                
+                // Se não é o último attempt, continua tentando
+                if (attempts < maxAttempts) {
+                    console.log(`[StackSpot] 🔄 Continuando... (${maxAttempts - attempts} tentativas restantes)`);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                } else {
+                    // Se é o último attempt, relança o erro
+                    const totalDuration = Date.now() - startTime;
+                    console.error(`[StackSpot] 💥 Falha definitiva após ${attempts} tentativas e ${Math.round(totalDuration / 1000)}s`);
+                    throw error;
+                }
+            }
+        }
+        
+        // Timeout atingido
+        const totalDuration = Date.now() - startTime;
+        console.error(`[StackSpot] ⏰ Timeout atingido após ${attempts} tentativas e ${Math.round(totalDuration / 1000)}s`);
+        console.error(`[StackSpot] 🆔 Execution ID: ${executionId}`);
+        throw new Error(`Timeout: Execução não foi concluída após ${maxAttempts} tentativas (${maxAttempts * 5} segundos)`);
+    }
+
+    /**
+     * Executa um quick-command no StackSpot de forma completa (criação + polling até conclusão)
+     * @param slug - SLUG do quick-command a ser executado
+     * @param payload - Dados de entrada para o quick-command
+     * @param conversationId - ID da conversa (opcional)
+     * @param maxWaitMinutes - Tempo máximo de espera em minutos (padrão: 5)
+     * @returns Promise<any> - Resultado final da execução
+     */
+    public async executeQuickCommand(slug: string, payload: any, conversationId?: string, maxWaitMinutes: number = 5): Promise<any> {
+        const startTime = Date.now();
+        const maxAttempts = maxWaitMinutes * 12; // 12 tentativas por minuto (5s cada)
+        
+        console.log(`[StackSpot] 🚀 ========== INICIANDO EXECUÇÃO DE QUICK-COMMAND ==========`);
+        console.log(`[StackSpot] 📋 Slug: ${slug}`);
+        console.log(`[StackSpot] 📝 Payload: ${JSON.stringify(payload, null, 2)}`);
+        console.log(`[StackSpot] 💬 Conversation ID: ${conversationId || 'N/A'}`);
+        console.log(`[StackSpot] ⏰ Timeout máximo: ${maxWaitMinutes} minutos (${maxAttempts} tentativas)`);
+        console.log(`[StackSpot] ===============================================================`);
+
+        try {
+            // 1. Carrega as configurações
+            console.log(`[StackSpot] 📂 Etapa 1/4: Carregando configurações...`);
+            const config = vscode.workspace.getConfiguration('aiCodeHive');
+            const clientId = config.get<string>('stackspot.clientId') || this._context.globalState.get<string>('stackspot_client_id');
+            const clientSecret = config.get<string>('stackspot.clientSecret') || this._context.globalState.get<string>('stackspot_client_secret');
+            const realm = config.get<string>('stackspot.realm') || this._context.globalState.get<string>('stackspot_realm') || 'stackspot-freemium';
+
+            if (!clientId || !clientSecret) {
+                console.error(`[StackSpot] ❌ Configurações do StackSpot não encontradas`);
+                console.error(`[StackSpot] 🔧 Client ID: ${clientId ? 'Configurado' : 'Não configurado'}`);
+                console.error(`[StackSpot] 🔧 Client Secret: ${clientSecret ? 'Configurado' : 'Não configurado'}`);
+                throw new Error('Client ID e Client Secret são obrigatórios. Configure-os nas configurações da extensão.');
+            }
+            
+            console.log(`[StackSpot] ✅ Configurações carregadas com sucesso`);
+            console.log(`[StackSpot] 🔧 Client ID: ${clientId.substring(0, 8)}...`);
+
+            // 2. Obtém o token de acesso
+            console.log(`[StackSpot] 🔑 Etapa 2/4: Obtendo token de acesso...`);
+            const tokenUrl = `https://idm.stackspot.com/${realm}/oidc/oauth/token`;
+            const tokenResponse = await fetch(tokenUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: `client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}&grant_type=client_credentials`
+            });
+
+            if (!tokenResponse.ok) {
+                const errorText = await tokenResponse.text();
+                console.error(`[StackSpot] ❌ Erro ao obter token: ${tokenResponse.status} - ${tokenResponse.statusText}`);
+                console.error(`[StackSpot] 📄 Detalhes: ${errorText}`);
+                throw new Error(`Erro ao obter token: ${tokenResponse.status} - ${tokenResponse.statusText}`);
+            }
+
+            const tokenData = await tokenResponse.json();
+            const accessToken = tokenData.access_token;
+
+            if (!accessToken) {
+                console.error(`[StackSpot] ❌ Token de acesso não foi retornado pela API`);
+                throw new Error('Token de acesso não foi retornado pela API');
+            }
+
+            console.log(`[StackSpot] ✅ Token obtido com sucesso (${accessToken.substring(0, 20)}...)`);
+
+            // 3. Cria a execução do quick-command
+            console.log(`[StackSpot] 🎯 Etapa 3/4: Criando execução do quick-command...`);
+            const executionId = await this._createQuickCommandExecution(slug, payload, accessToken, conversationId);
+            console.log(`[StackSpot] ✅ Execução criada: ${executionId}`);
+            
+            // 4. Aguarda a conclusão da execução
+            console.log(`[StackSpot] ⏳ Etapa 4/4: Aguardando conclusão da execução...`);
+            const result = await this._waitForExecutionCompletion(executionId, accessToken, maxAttempts);
+            
+            const totalDuration = Date.now() - startTime;
+            console.log(`[StackSpot] 🎉 ========== EXECUÇÃO CONCLUÍDA COM SUCESSO ==========`);
+            console.log(`[StackSpot] 🆔 Execution ID: ${executionId}`);
+            console.log(`[StackSpot] ⏱️ Tempo total: ${Math.round(totalDuration / 1000)}s`);
+            console.log(`[StackSpot] 📄 Tamanho do resultado: ${JSON.stringify(result).length} caracteres`);
+            console.log(`[StackSpot] =====================================================`);
+
+            return result;
+
+        } catch (error) {
+            const totalDuration = Date.now() - startTime;
+            console.error(`[StackSpot] 💥 ========== ERRO NA EXECUÇÃO ==========`);
+            console.error(`[StackSpot] 📋 Slug: ${slug}`);
+            console.error(`[StackSpot] ⏱️ Tempo até erro: ${Math.round(totalDuration / 1000)}s`);
+            console.error(`[StackSpot] 💬 Conversation ID: ${conversationId || 'N/A'}`);
+            console.error(`[StackSpot] ❌ Erro: ${error instanceof Error ? error.message : String(error)}`);
+            console.error(`[StackSpot] 📝 Payload: ${JSON.stringify(payload)}`);
+            console.error(`[StackSpot] ==========================================`);
+            
+            throw error;
+        }
+    }
+
     private _getHtmlForWebview(webview: vscode.Webview) {
         return `<!DOCTYPE html>
 <html lang="pt-BR">
