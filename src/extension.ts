@@ -138,8 +138,8 @@ class HelloWorldPanel {
             backdrop-filter: blur(10px);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
             border: 1px solid rgba(255, 255, 255, 0.2);
-            max-width: 500px;
-            width: 90%;
+            max-width: 800px;
+            width: 95%;
         }
         
         h1 {
@@ -205,6 +205,21 @@ class HelloWorldPanel {
                  display: block;
              }
              
+             .feature-form-screen {
+                 display: none;
+                 background: rgba(255, 255, 255, 0.1);
+                 backdrop-filter: blur(20px);
+                 border-radius: 20px;
+                 padding: 30px;
+                 margin-top: 20px;
+                 border: 1px solid rgba(255, 255, 255, 0.2);
+                 animation: fadeIn 0.5s ease-in-out;
+             }
+             
+             .feature-form-screen.active {
+                 display: block;
+             }
+             
              .settings-title {
                  color: #fff;
                  font-size: 24px;
@@ -229,15 +244,44 @@ class HelloWorldPanel {
              
              .setting-input {
                  width: 100%;
-                 padding: 10px;
+                 padding: 12px;
                  border: none;
                  border-radius: 8px;
                  background: rgba(255, 255, 255, 0.1);
                  color: #fff;
                  font-size: 14px;
+                 transition: all 0.3s ease;
              }
              
-             .setting-input::placeholder {
+             .setting-input:focus {
+                 outline: none;
+                 background: rgba(255, 255, 255, 0.15);
+                 box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+             }
+             
+             .setting-textarea {
+                 width: 100%;
+                 padding: 12px;
+                 border: none;
+                 border-radius: 8px;
+                 background: rgba(255, 255, 255, 0.1);
+                 color: #fff;
+                 font-size: 14px;
+                 resize: vertical;
+                 min-height: 150px;
+                 font-family: inherit;
+                 line-height: 1.5;
+                 transition: all 0.3s ease;
+             }
+             
+             .setting-textarea:focus {
+                 outline: none;
+                 background: rgba(255, 255, 255, 0.15);
+                 box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+             }
+             
+             .setting-input::placeholder,
+             .setting-textarea::placeholder {
                  color: rgba(255, 255, 255, 0.6);
              }
              
@@ -283,6 +327,31 @@ class HelloWorldPanel {
               }
               
               .test-button:disabled {
+                  background: linear-gradient(135deg, #6c757d, #495057);
+                  cursor: not-allowed;
+                  transform: none;
+              }
+              
+              .generate-button {
+                  background: linear-gradient(135deg, #007bff, #0056b3);
+                  color: white;
+                  border: none;
+                  padding: 12px 24px;
+                  border-radius: 25px;
+                  cursor: pointer;
+                  font-size: 14px;
+                  font-weight: bold;
+                  margin: 20px 10px 10px 0;
+                  transition: all 0.3s ease;
+                  display: inline-block;
+              }
+              
+              .generate-button:hover {
+                  background: linear-gradient(135deg, #0056b3, #004085);
+                  transform: translateY(-2px);
+              }
+              
+              .generate-button:disabled {
                   background: linear-gradient(135deg, #6c757d, #495057);
                   cursor: not-allowed;
                   transform: none;
@@ -368,7 +437,7 @@ class HelloWorldPanel {
         <div class="emoji">🚀</div>
         <h1>Desenvolvimento Agile</h1>
         <p>Bem-vindo ao AI Code Hive - sua ferramenta para desenvolvimento ágil e produtivo!</p>
-        <button class="button" onclick="showMessage()">Vamos começar!</button>
+        <button class="button" onclick="showFeatureForm()">Vamos começar!</button>
          <button class="button secondary" onclick="showSettings()">Configurações</button>
         
         <div class="info">
@@ -399,6 +468,26 @@ class HelloWorldPanel {
              </div>
              
              <button class="back-button" onclick="hideSettings()">← Voltar</button>
+         </div>
+         
+         <div class="feature-form-screen" id="featureFormScreen">
+             <h2 class="settings-title">✨ Nova Funcionalidade</h2>
+             
+             <div class="setting-item">
+                 <label class="setting-label">Nome da Funcionalidade:</label>
+                 <input type="text" class="setting-input" placeholder="Digite o nome da funcionalidade" id="featureName">
+             </div>
+             
+             <div class="setting-item">
+                 <label class="setting-label">Descrição da Funcionalidade:</label>
+                 <textarea class="setting-textarea" placeholder="Descreva detalhadamente a funcionalidade desejada, incluindo requisitos, regras de negócio e comportamentos esperados..." id="featureDescription" rows="8"></textarea>
+             </div>
+             
+             <div style="text-align: center; margin-top: 20px;">
+                 <button class="generate-button" onclick="generateUserStories()">📝 Gerar histórias de usuário</button>
+             </div>
+             
+             <button class="back-button" onclick="hideFeatureForm()">← Voltar</button>
          </div>
     </div>
 
@@ -514,6 +603,34 @@ class HelloWorldPanel {
                    statusElement.className = 'connection-status status-' + status;
                    statusElement.textContent = message;
                }
+           }
+           
+           function showFeatureForm() {
+               document.getElementById('featureFormScreen').classList.add('active');
+               document.querySelector('.container > .emoji').style.display = 'none';
+               document.querySelector('.container > h1').style.display = 'none';
+               document.querySelector('.container > p').style.display = 'none';
+               document.querySelector('.button:not(.back-button)').style.display = 'none';
+               document.querySelector('.button.secondary').style.display = 'none';
+               document.querySelector('.info').style.display = 'none';
+           }
+           
+           function hideFeatureForm() {
+               document.getElementById('featureFormScreen').classList.remove('active');
+               document.querySelector('.container > .emoji').style.display = 'block';
+               document.querySelector('.container > h1').style.display = 'block';
+               document.querySelector('.container > p').style.display = 'block';
+               document.querySelector('.button:not(.back-button)').style.display = 'inline-block';
+               document.querySelector('.button.secondary').style.display = 'inline-block';
+               document.querySelector('.info').style.display = 'block';
+           }
+           
+           function generateUserStories() {
+               // Placeholder para funcionalidade futura
+               vscode.postMessage({
+                   command: 'alert',
+                   text: 'Funcionalidade em desenvolvimento! Em breve você poderá gerar histórias de usuário automaticamente. 🚧'
+               });
            }
         
         // Animação de entrada
