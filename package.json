@@ -40,6 +40,11 @@
           "default": "",
           "description": "StackSpot Client Secret para autenticação"
         },
+        "aiCodeHive.stackspot.realm": {
+          "type": "string",
+          "default": "stackspot-freemium",
+          "description": "Realm da aplicação StackSpot"
+        },
         "aiCodeHive.stackspot.slugs.createStories": {
           "type": "string",
           "default": "",

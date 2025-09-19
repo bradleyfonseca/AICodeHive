@@ -77,7 +77,7 @@ class HelloWorldPanel {
                         vscode.window.showInformationMessage(message.text);
                         return;
                     case 'saveSettings':
-                        this._saveSettings(message.clientId, message.clientSecret, message.slugs);
+                        this._saveSettings(message.clientId, message.clientSecret, message.slugs, message.realm);
                         webview.postMessage({ command: 'settingsSaved' });
                         return;
                     case 'loadSettings':
@@ -100,13 +100,16 @@ class HelloWorldPanel {
         );
     }
 
-    private _saveSettings(clientId: string, clientSecret: string, slugs: any) {
+    private _saveSettings(clientId: string, clientSecret: string, slugs: any, realm?: string) {
         // Salvar nas configurações do VS Code (workspace e global)
         const config = vscode.workspace.getConfiguration('aiCodeHive');
         
-        // Salvar Client ID e Client Secret
+        // Salvar Client ID, Client Secret e Realm
         config.update('stackspot.clientId', clientId, vscode.ConfigurationTarget.Global);
         config.update('stackspot.clientSecret', clientSecret, vscode.ConfigurationTarget.Global);
+        if (realm !== undefined) {
+            config.update('stackspot.realm', realm, vscode.ConfigurationTarget.Global);
+        }
         
         // Salvar SLUGs
         if (slugs) {
@@ -120,6 +123,9 @@ class HelloWorldPanel {
         // Também salvar no globalState como backup
         this._context.globalState.update('stackspot_client_id', clientId);
         this._context.globalState.update('stackspot_client_secret', clientSecret);
+        if (realm !== undefined) {
+            this._context.globalState.update('stackspot_realm', realm);
+        }
         
         if (slugs) {
             this._context.globalState.update('stackspot_slug_create_stories', slugs.createStories);
@@ -153,7 +159,11 @@ class HelloWorldPanel {
                 command: 'connectionTesting'
             });
 
-            const tokenUrl = 'https://idm.stackspot.com/stackspot-freemium/oidc/oauth/token';
+            // Carregar realm das configurações
+            const config = vscode.workspace.getConfiguration('aiCodeHive');
+            const realm = config.get<string>('stackspot.realm') || 'stackspot-freemium';
+            
+            const tokenUrl = `https://idm.stackspot.com/${realm}/oidc/oauth/token`;
             const requestBody = new URLSearchParams({
                 'client_id': clientId,
                 'client_secret': clientSecret,
@@ -161,6 +171,7 @@ class HelloWorldPanel {
             });
 
             console.log('🔍 [DEBUG] URL do token:', tokenUrl);
+            console.log('🔍 [DEBUG] Realm utilizado:', realm);
             console.log('🔍 [DEBUG] Request body:', requestBody.toString());
             console.log('🔍 [DEBUG] Headers:', {
                 'Content-Type': 'application/x-www-form-urlencoded'
@@ -226,6 +237,7 @@ class HelloWorldPanel {
         
         let clientId = config.get<string>('stackspot.clientId') || '';
         let clientSecret = config.get<string>('stackspot.clientSecret') || '';
+        let realm = config.get<string>('stackspot.realm') || 'stackspot-freemium';
         
         // Se não encontrar nas configurações, tentar carregar do globalState (backup)
         if (!clientId || !clientSecret) {
@@ -233,10 +245,15 @@ class HelloWorldPanel {
             clientSecret = clientSecret || this._context.globalState.get('stackspot_client_secret', '');
         }
         
+        if (!realm || realm === 'stackspot-freemium') {
+            realm = this._context.globalState.get('stackspot_realm', 'stackspot-freemium');
+        }
+        
         panel.webview.postMessage({
             command: 'settingsChecked',
             clientId: clientId,
-            clientSecret: clientSecret
+            clientSecret: clientSecret,
+            realm: realm
         });
     }
 
@@ -246,11 +263,16 @@ class HelloWorldPanel {
         
         let clientId = config.get<string>('stackspot.clientId') || '';
         let clientSecret = config.get<string>('stackspot.clientSecret') || '';
+        let realm = config.get<string>('stackspot.realm') || 'stackspot-freemium';
         
         // Se não encontrar nas configurações, tentar carregar do globalState (backup)
         if (!clientId || !clientSecret) {
             clientId = clientId || this._context.globalState.get('stackspot_client_id', '');
             clientSecret = clientSecret || this._context.globalState.get('stackspot_client_secret', '');
+        }
+        
+        if (!realm || realm === 'stackspot-freemium') {
+            realm = this._context.globalState.get('stackspot_realm', 'stackspot-freemium');
         }
         
         const slugs = {
@@ -265,6 +287,7 @@ class HelloWorldPanel {
             command: 'settingsLoaded',
             clientId: clientId,
             clientSecret: clientSecret,
+            realm: realm,
             slugs: slugs
         });
     }
@@ -534,6 +557,12 @@ class HelloWorldPanel {
                 <input type="password" class="form-input" placeholder="Digite seu Client Secret do StackSpot" id="clientSecret">
             </div>
             
+            <div class="form-group">
+                <label class="form-label">Realm (StackSpot):</label>
+                <input type="text" class="form-input" placeholder="stackspot-freemium" id="realm" value="stackspot-freemium">
+                <small style="color: #888; font-size: 0.9em; margin-top: 5px; display: block;">Realm da aplicação StackSpot (padrão: stackspot-freemium)</small>
+            </div>
+            
             <h3 style="margin: 30px 0 20px 0; font-size: 1.3rem;">🔧 SLUGs das Funções</h3>
             
             <div class="form-group">
@@ -654,6 +683,7 @@ class HelloWorldPanel {
             document.getElementById('saveSettingsButton').addEventListener('click', function() {
                 const clientId = document.getElementById('clientId').value.trim();
                 const clientSecret = document.getElementById('clientSecret').value.trim();
+                const realm = document.getElementById('realm').value.trim() || 'stackspot-freemium';
                 
                 if (!clientId || !clientSecret) {
                     showNotification('Por favor, preencha Client ID e Client Secret', 'error');
@@ -672,6 +702,7 @@ class HelloWorldPanel {
                     command: 'saveSettings',
                     clientId: clientId,
                     clientSecret: clientSecret,
+                    realm: realm,
                     slugs: slugs
                 });
             });
@@ -734,6 +765,9 @@ class HelloWorldPanel {
                     }
                     if (message.clientSecret) {
                         document.getElementById('clientSecret').value = message.clientSecret;
+                    }
+                    if (message.realm) {
+                        document.getElementById('realm').value = message.realm;
                     }
                     if (message.slugs) {
                         document.getElementById('slugCreateStories').value = message.slugs.createStories || 'pm-quebra-historias';
