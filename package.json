@@ -26,7 +26,47 @@
         "title": "Desenvolvimento Agile",
         "category": "AICodeHive"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "AI Code Hive",
+      "properties": {
+        "aiCodeHive.stackspot.clientId": {
+          "type": "string",
+          "default": "",
+          "description": "StackSpot Client ID para autenticação"
+        },
+        "aiCodeHive.stackspot.clientSecret": {
+          "type": "string",
+          "default": "",
+          "description": "StackSpot Client Secret para autenticação"
+        },
+        "aiCodeHive.stackspot.slugs.createStories": {
+          "type": "string",
+          "default": "",
+          "description": "SLUG para criação de histórias"
+        },
+        "aiCodeHive.stackspot.slugs.detailBusiness": {
+          "type": "string",
+          "default": "",
+          "description": "SLUG para detalhamento de negócio"
+        },
+        "aiCodeHive.stackspot.slugs.detailTechnical": {
+          "type": "string",
+          "default": "",
+          "description": "SLUG para detalhamento técnico"
+        },
+        "aiCodeHive.stackspot.slugs.createTests": {
+          "type": "string",
+          "default": "",
+          "description": "SLUG para criação de testes"
+        },
+        "aiCodeHive.stackspot.slugs.createTasks": {
+          "type": "string",
+          "default": "",
+          "description": "SLUG para criação de tarefas"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

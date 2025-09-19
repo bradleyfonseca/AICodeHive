@@ -17,6 +17,7 @@ class HelloWorldPanel {
 
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
+    private readonly _context: vscode.ExtensionContext;
     private _disposables: vscode.Disposable[] = [];
 
     public static createOrShow(extensionUri: vscode.Uri, context?: vscode.ExtensionContext) {
@@ -24,64 +25,36 @@ class HelloWorldPanel {
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
 
-        // Se já existe um painel, apenas o mostra
         if (HelloWorldPanel.currentPanel) {
             HelloWorldPanel.currentPanel._panel.reveal(column);
             return;
         }
 
-        // Caso contrário, cria um novo painel
         const panel = vscode.window.createWebviewPanel(
             HelloWorldPanel.viewType,
-            'AICodeHive - Hello World',
+            'AI Code Hive: Desenvolvimento Agile',
             column || vscode.ViewColumn.One,
             {
                 enableScripts: true,
-                localResourceRoots: [
-                    vscode.Uri.joinPath(extensionUri, 'media')
-                ]
+                localResourceRoots: [extensionUri]
             }
         );
 
-        HelloWorldPanel.currentPanel = new HelloWorldPanel(panel, extensionUri);
-
-        // Adicionar listener para mensagens do webview
-        if (context) {
-            panel.webview.onDidReceiveMessage(
-                async (message) => {
-                    switch (message.command) {
-                        case 'saveCredentials':
-                            // Armazenar credenciais e token no estado global
-                            await context.globalState.update('stackspot_client_id', message.clientId);
-                            await context.globalState.update('stackspot_client_secret', message.clientSecret);
-                            await context.globalState.update('stackspot_access_token', message.accessToken);
-                            await context.globalState.update('stackspot_token_expires', Date.now() + (message.expiresIn * 1000));
-                            
-                            vscode.window.showInformationMessage('Credenciais do StackSpot salvas com sucesso!');
-                            break;
-                    }
-                },
-                undefined,
-                context.subscriptions
-            );
-        }
+        HelloWorldPanel.currentPanel = new HelloWorldPanel(panel, extensionUri, context!);
     }
 
-    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
+    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
         this._panel = panel;
         this._extensionUri = extensionUri;
+        this._context = context;
 
-        // Define o conteúdo HTML inicial
         this._update();
-
-        // Escuta quando o painel é fechado
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     }
 
     public dispose() {
         HelloWorldPanel.currentPanel = undefined;
 
-        // Limpa os recursos
         this._panel.dispose();
 
         while (this._disposables.length) {
@@ -95,19 +68,205 @@ class HelloWorldPanel {
     private _update() {
         const webview = this._panel.webview;
         this._panel.webview.html = this._getHtmlForWebview(webview);
-
-        // Escuta mensagens do webview
-        webview.onDidReceiveMessage(
+        
+        // Handle messages from the webview
+        this._panel.webview.onDidReceiveMessage(
             message => {
                 switch (message.command) {
                     case 'alert':
                         vscode.window.showInformationMessage(message.text);
+                        return;
+                    case 'saveSettings':
+                        this._saveSettings(message.clientId, message.clientSecret, message.slugs);
+                        webview.postMessage({ command: 'settingsSaved' });
+                        return;
+                    case 'loadSettings':
+                        this._loadSettings(this._panel);
+                        return;
+                    case 'checkSettings':
+                        this._checkSettings(this._panel);
+                        return;
+                    case 'testConnection':
+                        this._testStackSpotConnection(message.clientId, message.clientSecret, this._panel);
+                        return;
+                    case 'generateStories':
+                        vscode.window.showInformationMessage(`Gerando histórias para: ${message.featureName}`);
+                        // Aqui será implementada a integração com StackSpot
                         return;
                 }
             },
             null,
             this._disposables
         );
+    }
+
+    private _saveSettings(clientId: string, clientSecret: string, slugs: any) {
+        // Salvar nas configurações do VS Code (workspace e global)
+        const config = vscode.workspace.getConfiguration('aiCodeHive');
+        
+        // Salvar Client ID e Client Secret
+        config.update('stackspot.clientId', clientId, vscode.ConfigurationTarget.Global);
+        config.update('stackspot.clientSecret', clientSecret, vscode.ConfigurationTarget.Global);
+        
+        // Salvar SLUGs
+        if (slugs) {
+            config.update('stackspot.slugs.createStories', slugs.createStories, vscode.ConfigurationTarget.Global);
+            config.update('stackspot.slugs.detailBusiness', slugs.detailBusiness, vscode.ConfigurationTarget.Global);
+            config.update('stackspot.slugs.detailTechnical', slugs.detailTechnical, vscode.ConfigurationTarget.Global);
+            config.update('stackspot.slugs.createTests', slugs.createTests, vscode.ConfigurationTarget.Global);
+            config.update('stackspot.slugs.createTasks', slugs.createTasks, vscode.ConfigurationTarget.Global);
+        }
+        
+        // Também salvar no globalState como backup
+        this._context.globalState.update('stackspot_client_id', clientId);
+        this._context.globalState.update('stackspot_client_secret', clientSecret);
+        
+        if (slugs) {
+            this._context.globalState.update('stackspot_slug_create_stories', slugs.createStories);
+            this._context.globalState.update('stackspot_slug_detail_business', slugs.detailBusiness);
+            this._context.globalState.update('stackspot_slug_detail_technical', slugs.detailTechnical);
+            this._context.globalState.update('stackspot_slug_create_tests', slugs.createTests);
+            this._context.globalState.update('stackspot_slug_create_tasks', slugs.createTasks);
+        }
+        
+        vscode.window.showInformationMessage('Configurações salvas com sucesso no VS Code!');
+    }
+
+    private async _testStackSpotConnection(clientId: string, clientSecret: string, panel: vscode.WebviewPanel) {
+        try {
+            // Validar se os campos estão preenchidos
+            if (!clientId || !clientSecret) {
+                console.log('❌ [DEBUG] Client ID ou Client Secret não fornecidos');
+                panel.webview.postMessage({
+                    command: 'connectionError',
+                    error: 'Por favor, preencha Client ID e Client Secret'
+                });
+                return;
+            }
+
+            console.log('🔍 [DEBUG] Iniciando teste de conexão StackSpot');
+            console.log('🔍 [DEBUG] Client ID:', clientId ? `${clientId.substring(0, 8)}...` : 'VAZIO');
+            console.log('🔍 [DEBUG] Client Secret:', clientSecret ? `${clientSecret.substring(0, 8)}...` : 'VAZIO');
+
+            // Mostrar loading
+            panel.webview.postMessage({
+                command: 'connectionTesting'
+            });
+
+            const tokenUrl = 'https://idm.stackspot.com/stackspot-freemium/oidc/oauth/token';
+            const requestBody = new URLSearchParams({
+                'client_id': clientId,
+                'client_secret': clientSecret,
+                'grant_type': 'client_credentials'
+            });
+
+            console.log('🔍 [DEBUG] URL do token:', tokenUrl);
+            console.log('🔍 [DEBUG] Request body:', requestBody.toString());
+            console.log('🔍 [DEBUG] Headers:', {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            });
+
+            // Fazer requisição para obter token de acesso
+            const tokenResponse = await fetch(tokenUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: requestBody
+            });
+
+            console.log('🔍 [DEBUG] Status da resposta do token:', tokenResponse.status);
+            console.log('🔍 [DEBUG] Content-Type da resposta:', tokenResponse.headers.get('content-type'));
+
+            if (!tokenResponse.ok) {
+                const errorText = await tokenResponse.text();
+                console.log('❌ [DEBUG] Erro na requisição do token:', errorText);
+                console.log('❌ [DEBUG] Status completo:', tokenResponse.status, tokenResponse.statusText);
+                
+                panel.webview.postMessage({
+                    command: 'connectionError',
+                    error: `Erro na autenticação: ${tokenResponse.status} - ${tokenResponse.statusText}. Verifique suas credenciais. Detalhes: ${errorText}`
+                });
+                return;
+            }
+
+            const tokenData = await tokenResponse.json();
+            console.log('✅ [DEBUG] Token obtido com sucesso');
+            console.log('🔍 [DEBUG] Tipo do token:', tokenData.token_type);
+            console.log('🔍 [DEBUG] Token (primeiros 20 chars):', tokenData.access_token ? tokenData.access_token.substring(0, 20) + '...' : 'VAZIO');
+            
+            // Se conseguiu obter o token, a conexão está válida
+            if (tokenData.access_token) {
+                console.log('✅ [DEBUG] Conexão com StackSpot estabelecida com sucesso!');
+                
+                panel.webview.postMessage({
+                    command: 'connectionSuccess'
+                });
+            } else {
+                console.log('❌ [DEBUG] Token de acesso não encontrado na resposta');
+                
+                panel.webview.postMessage({
+                    command: 'connectionError',
+                    error: 'Token de acesso não encontrado na resposta'
+                });
+            }
+
+        } catch (error) {
+            console.log('❌ [DEBUG] Erro de exceção:', error);
+            panel.webview.postMessage({
+                command: 'connectionError',
+                error: `Erro de conexão: ${error instanceof Error ? error.message : 'Erro desconhecido'}`
+            });
+        }
+    }
+
+    private _checkSettings(panel: vscode.WebviewPanel) {
+        // Carregar das configurações do VS Code primeiro
+        const config = vscode.workspace.getConfiguration('aiCodeHive');
+        
+        let clientId = config.get<string>('stackspot.clientId') || '';
+        let clientSecret = config.get<string>('stackspot.clientSecret') || '';
+        
+        // Se não encontrar nas configurações, tentar carregar do globalState (backup)
+        if (!clientId || !clientSecret) {
+            clientId = clientId || this._context.globalState.get('stackspot_client_id', '');
+            clientSecret = clientSecret || this._context.globalState.get('stackspot_client_secret', '');
+        }
+        
+        panel.webview.postMessage({
+            command: 'settingsChecked',
+            clientId: clientId,
+            clientSecret: clientSecret
+        });
+    }
+
+    private _loadSettings(panel: vscode.WebviewPanel) {
+        // Carregar das configurações do VS Code primeiro
+        const config = vscode.workspace.getConfiguration('aiCodeHive');
+        
+        let clientId = config.get<string>('stackspot.clientId') || '';
+        let clientSecret = config.get<string>('stackspot.clientSecret') || '';
+        
+        // Se não encontrar nas configurações, tentar carregar do globalState (backup)
+        if (!clientId || !clientSecret) {
+            clientId = clientId || this._context.globalState.get('stackspot_client_id', '');
+            clientSecret = clientSecret || this._context.globalState.get('stackspot_client_secret', '');
+        }
+        
+        const slugs = {
+            createStories: config.get<string>('stackspot.slugs.createStories') || this._context.globalState.get('stackspot_slug_create_stories', ''),
+            detailBusiness: config.get<string>('stackspot.slugs.detailBusiness') || this._context.globalState.get('stackspot_slug_detail_business', ''),
+            detailTechnical: config.get<string>('stackspot.slugs.detailTechnical') || this._context.globalState.get('stackspot_slug_detail_technical', ''),
+            createTests: config.get<string>('stackspot.slugs.createTests') || this._context.globalState.get('stackspot_slug_create_tests', ''),
+            createTasks: config.get<string>('stackspot.slugs.createTasks') || this._context.globalState.get('stackspot_slug_create_tasks', '')
+        };
+        
+        panel.webview.postMessage({
+            command: 'settingsLoaded',
+            clientId: clientId,
+            clientSecret: clientSecret,
+            slugs: slugs
+        });
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
@@ -118,16 +277,22 @@ class HelloWorldPanel {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Code Hive: Desenvolvimento Agile</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        * {
             margin: 0;
             padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
             min-height: 100vh;
             display: flex;
-            align-items: center;
             justify-content: center;
+            align-items: center;
+            color: white;
+            opacity: 0;
+            transition: opacity 0.5s ease-in;
         }
         
         .container {
@@ -142,11 +307,24 @@ class HelloWorldPanel {
             width: 95%;
         }
         
+        .screen {
+            display: none;
+        }
+        
+        .screen.active {
+            display: block;
+        }
+        
         h1 {
-            font-size: 3rem;
+            font-size: 2.5rem;
             margin-bottom: 20px;
             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-            animation: fadeInUp 1s ease-out;
+        }
+        
+        h2 {
+            font-size: 2rem;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
         }
         
         .emoji {
@@ -159,7 +337,6 @@ class HelloWorldPanel {
             font-size: 1.2rem;
             margin-bottom: 30px;
             opacity: 0.9;
-            animation: fadeInUp 1s ease-out 0.3s both;
         }
         
         .button {
@@ -172,251 +349,144 @@ class HelloWorldPanel {
             cursor: pointer;
             transition: all 0.3s ease;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-            animation: fadeInUp 1s ease-out 0.6s both;
+            margin: 10px;
         }
         
-        .button:hover {
+        .button:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
         }
         
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        
         .button.secondary {
-                 background: linear-gradient(135deg, #6c757d, #495057);
-                 margin-top: 10px;
-             }
-             
-             .button.secondary:hover {
-                 background: linear-gradient(135deg, #5a6268, #343a40);
-                 transform: translateY(-3px);
-             }
-             
-             .settings-screen {
-                 display: none;
-                 background: rgba(255, 255, 255, 0.1);
-                 backdrop-filter: blur(20px);
-                 border-radius: 20px;
-                 padding: 30px;
-                 margin-top: 20px;
-                 border: 1px solid rgba(255, 255, 255, 0.2);
-                 animation: fadeIn 0.5s ease-in-out;
-             }
-             
-             .settings-screen.active {
-                 display: block;
-             }
-             
-             .feature-form-screen {
-                 display: none;
-                 background: rgba(255, 255, 255, 0.1);
-                 backdrop-filter: blur(20px);
-                 border-radius: 20px;
-                 padding: 30px;
-                 margin-top: 20px;
-                 border: 1px solid rgba(255, 255, 255, 0.2);
-                 animation: fadeIn 0.5s ease-in-out;
-             }
-             
-             .feature-form-screen.active {
-                 display: block;
-             }
-             
-             .settings-title {
-                 color: #fff;
-                 font-size: 24px;
-                 margin-bottom: 20px;
-                 text-align: center;
-             }
-             
-             .setting-item {
-                 margin-bottom: 20px;
-                 padding: 15px;
-                 background: rgba(255, 255, 255, 0.05);
-                 border-radius: 10px;
-                 border: 1px solid rgba(255, 255, 255, 0.1);
-             }
-             
-             .setting-label {
-                 color: #fff;
-                 font-weight: bold;
-                 margin-bottom: 8px;
-                 display: block;
-             }
-             
-             .setting-input {
-                 width: 100%;
-                 padding: 12px;
-                 border: none;
-                 border-radius: 8px;
-                 background: rgba(255, 255, 255, 0.1);
-                 color: #fff;
-                 font-size: 14px;
-                 transition: all 0.3s ease;
-             }
-             
-             .setting-input:focus {
-                 outline: none;
-                 background: rgba(255, 255, 255, 0.15);
-                 box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
-             }
-             
-             .setting-textarea {
-                 width: 100%;
-                 padding: 12px;
-                 border: none;
-                 border-radius: 8px;
-                 background: rgba(255, 255, 255, 0.1);
-                 color: #fff;
-                 font-size: 14px;
-                 resize: vertical;
-                 min-height: 150px;
-                 font-family: inherit;
-                 line-height: 1.5;
-                 transition: all 0.3s ease;
-             }
-             
-             .setting-textarea:focus {
-                 outline: none;
-                 background: rgba(255, 255, 255, 0.15);
-                 box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
-             }
-             
-             .setting-input::placeholder,
-             .setting-textarea::placeholder {
-                 color: rgba(255, 255, 255, 0.6);
-             }
-             
-             .setting-checkbox {
-                 margin-right: 10px;
-             }
-             
-             .back-button {
-                 background: linear-gradient(135deg, #dc3545, #c82333);
-                 color: white;
-                 border: none;
-                 padding: 10px 20px;
-                 border-radius: 25px;
-                 cursor: pointer;
-                 font-size: 14px;
-                 font-weight: bold;
-                 margin-top: 20px;
-                 transition: all 0.3s ease;
-             }
-             
-             .back-button:hover {
-                  background: linear-gradient(135deg, #c82333, #bd2130);
-                  transform: translateY(-2px);
-              }
-              
-              .test-button {
-                  background: linear-gradient(135deg, #28a745, #20c997);
-                  color: white;
-                  border: none;
-                  padding: 12px 24px;
-                  border-radius: 25px;
-                  cursor: pointer;
-                  font-size: 14px;
-                  font-weight: bold;
-                  margin: 20px 10px 10px 0;
-                  transition: all 0.3s ease;
-                  display: inline-block;
-              }
-              
-              .test-button:hover {
-                  background: linear-gradient(135deg, #218838, #1e7e34);
-                  transform: translateY(-2px);
-              }
-              
-              .test-button:disabled {
-                  background: linear-gradient(135deg, #6c757d, #495057);
-                  cursor: not-allowed;
-                  transform: none;
-              }
-              
-              .generate-button {
-                  background: linear-gradient(135deg, #007bff, #0056b3);
-                  color: white;
-                  border: none;
-                  padding: 12px 24px;
-                  border-radius: 25px;
-                  cursor: pointer;
-                  font-size: 14px;
-                  font-weight: bold;
-                  margin: 20px 10px 10px 0;
-                  transition: all 0.3s ease;
-                  display: inline-block;
-              }
-              
-              .generate-button:hover {
-                  background: linear-gradient(135deg, #0056b3, #004085);
-                  transform: translateY(-2px);
-              }
-              
-              .generate-button:disabled {
-                  background: linear-gradient(135deg, #6c757d, #495057);
-                  cursor: not-allowed;
-                  transform: none;
-              }
-              
-              .connection-status {
-                  padding: 12px;
-                  border-radius: 8px;
-                  margin: 15px 0;
-                  font-size: 14px;
-                  font-weight: 500;
-                  text-align: center;
-                  transition: all 0.3s ease;
-                  border: 1px solid transparent;
-              }
-              
-              .status-idle {
-                  background: rgba(100, 116, 139, 0.1);
-                  color: #64748b;
-                  border-color: rgba(100, 116, 139, 0.2);
-              }
-              
-              .status-testing {
-                  background: rgba(59, 130, 246, 0.1);
-                  color: #3b82f6;
-                  border-color: rgba(59, 130, 246, 0.2);
-                  animation: pulse 2s infinite;
-              }
-              
-              .status-success {
-                  background: rgba(34, 197, 94, 0.1);
-                  color: #22c55e;
-                  border-color: rgba(34, 197, 94, 0.2);
-              }
-              
-              .status-error {
-                  background: rgba(239, 68, 68, 0.1);
-                  color: #ef4444;
-                  border-color: rgba(239, 68, 68, 0.2);
-              }
-              
-              @keyframes pulse {
-                  0% { opacity: 1; }
-                  50% { opacity: 0.6; }
-                  100% { opacity: 1; }
-              }
-              
-              .info {
-                   margin-top: 30px;
-                   padding: 20px;
+            background: linear-gradient(45deg, #74b9ff, #0984e3);
+        }
+        
+        .button.back {
+            background: linear-gradient(45deg, #6c757d, #495057);
+            padding: 10px 20px;
+            font-size: 0.9rem;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: white;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+        }
+        
+        .form-input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .form-textarea {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 120px;
+            font-family: inherit;
+            line-height: 1.5;
+            transition: all 0.3s ease;
+        }
+        
+        .form-textarea:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+        }
+        
+        .form-textarea::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .info {
+            margin-top: 30px;
+            padding: 20px;
             background: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
             font-size: 0.9rem;
-            animation: fadeInUp 1s ease-out 0.9s both;
+            opacity: 0.8;
         }
         
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(30px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        .success-message {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            display: none;
+        }
+        
+        .success-message.show {
+            display: block;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            z-index: 1000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+            max-width: 300px;
+            word-wrap: break-word;
+        }
+        
+        .notification.show {
+            transform: translateX(0);
+        }
+        
+        .notification.success {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        
+        .notification.error {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        
+        .notification.info {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            border: 1px solid rgba(59, 130, 246, 0.3);
         }
         
         @keyframes bounce {
@@ -434,208 +504,274 @@ class HelloWorldPanel {
 </head>
 <body>
     <div class="container">
-        <div class="emoji">🚀</div>
-        <h1>Desenvolvimento Agile</h1>
-        <p>Bem-vindo ao AI Code Hive - sua ferramenta para desenvolvimento ágil e produtivo!</p>
-        <button class="button" onclick="showFeatureForm()">Vamos começar!</button>
-         <button class="button secondary" onclick="showSettings()">Configurações</button>
-        
-        <div class="info">
-             <strong>🎯 AI Code Hive: Desenvolvimento Agile</strong><br>
-             Focado em produtividade e metodologias ágeis<br>
-             <small>Versão 1.0.0</small>
-         </div>
-         
-         <div class="settings-screen" id="settingsScreen">
-             <h2 class="settings-title">⚙️ Configurações</h2>
-             
-             <div class="setting-item">
-                 <label class="setting-label">Client ID (StackSpot):</label>
-                 <input type="text" class="setting-input" placeholder="Digite seu Client ID do StackSpot" id="clientId">
-             </div>
-             
-             <div class="setting-item">
-                 <label class="setting-label">Client Secret (StackSpot):</label>
-                 <input type="password" class="setting-input" placeholder="Digite seu Client Secret do StackSpot" id="clientSecret">
-             </div>
-             
-             <div style="text-align: center; margin-top: 20px;">
-                 <button class="test-button" onclick="testConnection()">🔗 Testar Conexão</button>
-             </div>
-             
-             <div class="connection-status status-idle" id="connectionStatus">
-                 ⚪ Aguardando teste de conexão...
-             </div>
-             
-             <button class="back-button" onclick="hideSettings()">← Voltar</button>
-         </div>
-         
-         <div class="feature-form-screen" id="featureFormScreen">
-             <h2 class="settings-title">✨ Nova Funcionalidade</h2>
-             
-             <div class="setting-item">
-                 <label class="setting-label">Nome da Funcionalidade:</label>
-                 <input type="text" class="setting-input" placeholder="Digite o nome da funcionalidade" id="featureName">
-             </div>
-             
-             <div class="setting-item">
-                 <label class="setting-label">Descrição da Funcionalidade:</label>
-                 <textarea class="setting-textarea" placeholder="Descreva detalhadamente a funcionalidade desejada, incluindo requisitos, regras de negócio e comportamentos esperados..." id="featureDescription" rows="8"></textarea>
-             </div>
-             
-             <div style="text-align: center; margin-top: 20px;">
-                 <button class="generate-button" onclick="generateUserStories()">📝 Gerar histórias de usuário</button>
-             </div>
-             
-             <button class="back-button" onclick="hideFeatureForm()">← Voltar</button>
-         </div>
+        <!-- Tela Principal -->
+        <div class="screen active" id="homeScreen">
+            <div class="emoji">🚀</div>
+            <h1>Desenvolvimento Agile</h1>
+            <p>Bem-vindo ao AI Code Hive - sua ferramenta para desenvolvimento ágil e produtivo!</p>
+            
+            <button class="button" id="startButton">Vamos começar!</button>
+            <button class="button secondary" id="settingsButton">Configurações</button>
+            
+            <div class="info">
+                <strong>🎯 AI Code Hive: Desenvolvimento Agile</strong><br>
+                Focado em produtividade e metodologias ágeis<br>
+                <small>Versão 1.0.0</small>
+            </div>
+        </div>
+
+        <!-- Tela de Configurações -->
+        <div class="screen" id="settingsScreen">
+            <h2>⚙️ Configurações</h2>
+            
+            <div class="form-group">
+                <label class="form-label">Client ID (StackSpot):</label>
+                <input type="text" class="form-input" placeholder="Digite seu Client ID do StackSpot" id="clientId">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Client Secret (StackSpot):</label>
+                <input type="password" class="form-input" placeholder="Digite seu Client Secret do StackSpot" id="clientSecret">
+            </div>
+            
+            <h3 style="margin: 30px 0 20px 0; font-size: 1.3rem;">🔧 SLUGs das Funções</h3>
+            
+            <div class="form-group">
+                <label class="form-label">Criar histórias de usuário:</label>
+                <input type="text" class="form-input" placeholder="pm-quebra-historias" id="slugCreateStories" value="pm-quebra-historias">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Detalhar história (negócio):</label>
+                <input type="text" class="form-input" placeholder="pm-refina-historias" id="slugDetailBusiness" value="pm-refina-historias">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Detalhar história (técnico):</label>
+                <input type="text" class="form-input" placeholder="tcl-refina-historias" id="slugDetailTechnical" value="tcl-refina-historias">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Criar cenários de Testes:</label>
+                <input type="text" class="form-input" placeholder="qa-cria-cenarios-testes" id="slugCreateTests" value="qa-cria-cenarios-testes">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Criar tarefas de desenvolvimento:</label>
+                <input type="text" class="form-input" placeholder="tcl-quebra-tarefas" id="slugCreateTasks" value="tcl-quebra-tarefas">
+            </div>
+            
+            <div class="success-message" id="settingsSuccess">✅ Configurações salvas com sucesso!</div>
+            
+            <button class="button" id="saveSettingsButton">💾 Salvar Configurações</button>
+            <button class="button secondary" id="testConnectionButton">🔗 Testar Conexão</button>
+            <button class="button back" id="backFromSettingsButton">← Voltar</button>
+        </div>
+
+        <!-- Tela de Criação de Features -->
+        <div class="screen" id="featureScreen">
+            <h2>✨ Nova Funcionalidade</h2>
+            
+            <div class="form-group">
+                <label class="form-label">Nome da Funcionalidade:</label>
+                <input type="text" class="form-input" placeholder="Digite o nome da funcionalidade" id="featureName">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Descrição da Funcionalidade:</label>
+                <textarea class="form-textarea" placeholder="Descreva detalhadamente a funcionalidade desejada, incluindo requisitos, regras de negócio e comportamentos esperados..." id="featureDescription"></textarea>
+            </div>
+            
+            <button class="button" id="generateButton">📝 Gerar Histórias de Usuário</button>
+            <button class="button back" id="backFromFeatureButton">← Voltar</button>
+        </div>
     </div>
 
     <script>
         const vscode = acquireVsCodeApi();
         
-        function showMessage() {
-             vscode.postMessage({
-                 command: 'alert',
-                 text: 'Bem-vindo ao AI Code Hive: Desenvolvimento Agile! 🚀'
-             });
-         }
-         
-         function showSettings() {
-             document.getElementById('settingsScreen').classList.add('active');
-             document.querySelector('.container > .emoji').style.display = 'none';
-             document.querySelector('.container > h1').style.display = 'none';
-             document.querySelector('.container > p').style.display = 'none';
-             document.querySelector('.button:not(.back-button)').style.display = 'none';
-             document.querySelector('.button.secondary').style.display = 'none';
-             document.querySelector('.info').style.display = 'none';
-         }
-         
-         function hideSettings() {
-              document.getElementById('settingsScreen').classList.remove('active');
-              document.querySelector('.container > .emoji').style.display = 'block';
-              document.querySelector('.container > h1').style.display = 'block';
-              document.querySelector('.container > p').style.display = 'block';
-              document.querySelector('.button:not(.back-button)').style.display = 'inline-block';
-              document.querySelector('.button.secondary').style.display = 'inline-block';
-              document.querySelector('.info').style.display = 'block';
-          }
-          
-          async function testConnection() {
-              const clientIdInput = document.getElementById('clientId');
-              const clientSecretInput = document.getElementById('clientSecret');
-              const statusElement = document.getElementById('connectionStatus');
-              const testButton = document.querySelector('.test-button');
-
-              const clientId = clientIdInput?.value?.trim();
-              const clientSecret = clientSecretInput?.value?.trim();
-
-              // Validação dos campos
-              if (!clientId || !clientSecret) {
-                  updateConnectionStatus('error', '❌ Por favor, preencha Client ID e Client Secret');
-                  return;
-              }
-
-              // Atualizar UI para estado de teste
-              testButton.disabled = true;
-              testButton.innerHTML = '🔄 Testando...';
-              updateConnectionStatus('testing', '🔄 Testando conexão com StackSpot...');
-
-              try {
-                  // Preparar dados para o POST request
-                  const formData = new URLSearchParams();
-                  formData.append('client_id', clientId);
-                  formData.append('client_secret', clientSecret);
-                  formData.append('grant_type', 'client_credentials');
-
-                  // Fazer POST request para o endpoint do StackSpot
-                  const response = await fetch('https://idm.stackspot.com/stackspot-freemium/oidc/oauth/token', {
-                      method: 'POST',
-                      headers: {
-                          'Content-Type': 'application/x-www-form-urlencoded'
-                      },
-                      body: formData.toString()
-                  });
-
-                  if (response.ok) {
-                      const data = await response.json();
-                      
-                      if (data.access_token) {
-                          // Notificar o VS Code sobre o sucesso
-                          vscode.postMessage({
-                              command: 'saveCredentials',
-                              clientId: clientId,
-                              clientSecret: clientSecret,
-                              accessToken: data.access_token,
-                              expiresIn: data.expires_in
-                          });
-                          
-                          updateConnectionStatus('success', '✅ Conexão estabelecida com sucesso! Token obtido.');
-                      } else {
-                          updateConnectionStatus('error', '❌ Resposta inválida da API');
-                      }
-                  } else {
-                      const errorText = await response.text();
-                      let errorMessage = 'Erro na autenticação';
-                      
-                      try {
-                           const errorData = JSON.parse(errorText);
-                           errorMessage = errorData.error_description || errorData.error || errorMessage;
-                       } catch {
-                           errorMessage = 'Erro HTTP ' + response.status + ': ' + response.statusText;
-                       }
-                       
-                       updateConnectionStatus('error', '❌ ' + errorMessage);
-                  }
-              } catch (error) {
-                  console.error('Erro ao testar conexão:', error);
-                  updateConnectionStatus('error', '❌ Erro de rede. Verifique sua conexão com a internet.');
-              } finally {
-                  // Restaurar botão
-                  testButton.disabled = false;
-                  testButton.innerHTML = '🔗 Testar Conexão';
-              }
-          }
-
-          function updateConnectionStatus(status, message) {
-               const statusElement = document.getElementById('connectionStatus');
-               if (statusElement) {
-                   statusElement.className = 'connection-status status-' + status;
-                   statusElement.textContent = message;
-               }
-           }
-           
-           function showFeatureForm() {
-               document.getElementById('featureFormScreen').classList.add('active');
-               document.querySelector('.container > .emoji').style.display = 'none';
-               document.querySelector('.container > h1').style.display = 'none';
-               document.querySelector('.container > p').style.display = 'none';
-               document.querySelector('.button:not(.back-button)').style.display = 'none';
-               document.querySelector('.button.secondary').style.display = 'none';
-               document.querySelector('.info').style.display = 'none';
-           }
-           
-           function hideFeatureForm() {
-               document.getElementById('featureFormScreen').classList.remove('active');
-               document.querySelector('.container > .emoji').style.display = 'block';
-               document.querySelector('.container > h1').style.display = 'block';
-               document.querySelector('.container > p').style.display = 'block';
-               document.querySelector('.button:not(.back-button)').style.display = 'inline-block';
-               document.querySelector('.button.secondary').style.display = 'inline-block';
-               document.querySelector('.info').style.display = 'block';
-           }
-           
-           function generateUserStories() {
-               // Placeholder para funcionalidade futura
-               vscode.postMessage({
-                   command: 'alert',
-                   text: 'Funcionalidade em desenvolvimento! Em breve você poderá gerar histórias de usuário automaticamente. 🚧'
-               });
-           }
+        // Sistema de notificações
+        function showNotification(message, type = 'info') {
+            // Remove notificação existente se houver
+            const existingNotification = document.querySelector('.notification');
+            if (existingNotification) {
+                existingNotification.remove();
+            }
+            
+            // Cria nova notificação
+            const notification = document.createElement('div');
+            notification.className = 'notification ' + type;
+            notification.textContent = message;
+            
+            // Adiciona ao body
+            document.body.appendChild(notification);
+            
+            // Mostra a notificação
+            setTimeout(() => {
+                notification.classList.add('show');
+            }, 100);
+            
+            // Remove após 4 segundos
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }, 4000);
+        }
         
-        // Animação de entrada
-        window.addEventListener('load', function() {
+        // Navegação entre telas
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(screen => {
+                screen.classList.remove('active');
+            });
+            document.getElementById(screenId).classList.add('active');
+        }
+        
+        // Event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            // Função para verificar e atualizar o estado do botão "Vamos começar"
+            function updateStartButtonState() {
+                const startButton = document.getElementById('startButton');
+                // Verificar se há configurações salvas
+                vscode.postMessage({ command: 'checkSettings' });
+            }
+            
+            // Botões da tela principal
+            document.getElementById('startButton').addEventListener('click', function() {
+                showScreen('featureScreen');
+            });
+            
+            document.getElementById('settingsButton').addEventListener('click', function() {
+                showScreen('settingsScreen');
+                // Carregar configurações salvas
+                vscode.postMessage({ command: 'loadSettings' });
+            });
+            
+            // Botões da tela de configurações
+            document.getElementById('saveSettingsButton').addEventListener('click', function() {
+                const clientId = document.getElementById('clientId').value.trim();
+                const clientSecret = document.getElementById('clientSecret').value.trim();
+                
+                if (!clientId || !clientSecret) {
+                    showNotification('Por favor, preencha Client ID e Client Secret', 'error');
+                    return;
+                }
+                
+                const slugs = {
+                    createStories: document.getElementById('slugCreateStories').value.trim(),
+                    detailBusiness: document.getElementById('slugDetailBusiness').value.trim(),
+                    detailTechnical: document.getElementById('slugDetailTechnical').value.trim(),
+                    createTests: document.getElementById('slugCreateTests').value.trim(),
+                    createTasks: document.getElementById('slugCreateTasks').value.trim()
+                };
+                
+                vscode.postMessage({
+                    command: 'saveSettings',
+                    clientId: clientId,
+                    clientSecret: clientSecret,
+                    slugs: slugs
+                });
+            });
+            
+            document.getElementById('testConnectionButton').addEventListener('click', function() {
+                const clientId = document.getElementById('clientId').value.trim();
+                const clientSecret = document.getElementById('clientSecret').value.trim();
+                
+                if (!clientId || !clientSecret) {
+                    showNotification('Por favor, preencha Client ID e Client Secret antes de testar a conexão', 'error');
+                    return;
+                }
+                
+                vscode.postMessage({
+                    command: 'testConnection',
+                    clientId: clientId,
+                    clientSecret: clientSecret
+                });
+            });
+            
+            document.getElementById('backFromSettingsButton').addEventListener('click', function() {
+                showScreen('homeScreen');
+            });
+            
+            // Botões da tela de features
+            document.getElementById('generateButton').addEventListener('click', function() {
+                const featureName = document.getElementById('featureName').value.trim();
+                const featureDescription = document.getElementById('featureDescription').value.trim();
+                
+                if (!featureName || !featureDescription) {
+                    showNotification('Por favor, preencha o nome e a descrição da funcionalidade', 'error');
+                    return;
+                }
+                
+                vscode.postMessage({
+                    command: 'generateStories',
+                    featureName: featureName,
+                    featureDescription: featureDescription
+                });
+            });
+            
+            document.getElementById('backFromFeatureButton').addEventListener('click', function() {
+                showScreen('homeScreen');
+            });
+            
+            // Animação de entrada
             document.body.style.opacity = '1';
+            
+            // Verificar estado inicial do botão
+            updateStartButtonState();
+        });
+        
+        // Listener para mensagens do VS Code
+        window.addEventListener('message', event => {
+            const message = event.data;
+            switch (message.command) {
+                case 'settingsLoaded':
+                    if (message.clientId) {
+                        document.getElementById('clientId').value = message.clientId;
+                    }
+                    if (message.clientSecret) {
+                        document.getElementById('clientSecret').value = message.clientSecret;
+                    }
+                    if (message.slugs) {
+                        document.getElementById('slugCreateStories').value = message.slugs.createStories || 'pm-quebra-historias';
+                        document.getElementById('slugDetailBusiness').value = message.slugs.detailBusiness || 'pm-refina-historias';
+                        document.getElementById('slugDetailTechnical').value = message.slugs.detailTechnical || 'tcl-refina-historias';
+                        document.getElementById('slugCreateTests').value = message.slugs.createTests || 'qa-cria-cenarios-testes';
+                        document.getElementById('slugCreateTasks').value = message.slugs.createTasks || 'tcl-quebra-tarefas';
+                    }
+                    break;
+                case 'settingsChecked':
+                    const startButton = document.getElementById('startButton');
+                    const hasValidSettings = message.clientId && message.clientSecret;
+                    startButton.disabled = !hasValidSettings;
+                    if (!hasValidSettings) {
+                        startButton.title = 'Configure Client ID e Client Secret nas configurações antes de começar';
+                    } else {
+                        startButton.title = '';
+                    }
+                    break;
+                case 'settingsSaved':
+                    const successMsg = document.getElementById('settingsSuccess');
+                    successMsg.classList.add('show');
+                    setTimeout(() => {
+                        successMsg.classList.remove('show');
+                    }, 3000);
+                    // Atualizar estado do botão após salvar configurações
+                    updateStartButtonState();
+                    break;
+                case 'connectionTesting':
+                    showNotification('🔄 Testando conexão com StackSpot...', 'info');
+                    break;
+                case 'connectionSuccess':
+                    showNotification('✅ Conexão com StackSpot realizada com sucesso!', 'success');
+                    break;
+                case 'connectionError':
+                    showNotification('❌ Erro ao conectar com StackSpot: ' + message.error, 'error');
+                    break;
+            }
         });
     </script>
 </body>
